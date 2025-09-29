@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gemini AI Text-to-Speech</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts for a clean look -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <style>
+        /* Custom styles for the app */
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #111827; /* bg-gray-900 */
+        }
+        .loader {
+            border: 4px solid #f3f3f3; /* Light grey */
+            border-top: 4px solid #3498db; /* Blue */
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        /* Custom styles for better audio player controls */
+        audio::-webkit-media-controls-panel {
+            background-color: #374151; /* bg-gray-700 */
+        }
+        audio::-webkit-media-controls-play-button,
+        audio::-webkit-media-controls-mute-button {
+            background-color: #4b5563; /* bg-gray-600 */
+            border-radius: 50%;
+        }
+        audio::-webkit-media-controls-current-time-display,
+        audio::-webkit-media-controls-time-remaining-display {
+            color: #d1d5db; /* text-gray-300 */
+        }
+    </style>
+</head>
+<body class="text-white flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-2xl bg-gray-800 rounded-2xl shadow-2xl p-6 md:p-8 space-y-6">
+        <!-- Header -->
+        <div class="text-center">
+            <h1 class="text-3xl md:text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-teal-300">Gemini AI Text-to-Speech</h1>
+            <p class="text-gray-400 mt-2">Enter your text and select a voice to generate audio.</p>
+        </div>
+
+        <!-- Input Form -->
+        <div class="space-y-4">
+            <div>
+                <label for="text-input" class="block text-sm font-medium text-gray-300 mb-2">Text to Synthesize</label>
+                <textarea id="text-input" rows="6" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200" placeholder="Type your message here..."></textarea>
+            </div>
+            
+            <div>
+                <label for="voice-select" class="block text-sm font-medium text-gray-300 mb-2">Choose a Voice</label>
+                <select id="voice-select" class="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-gray-200 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition duration-200">
+                    <!-- Voice options will be populated by JavaScript -->
+                </select>
+            </div>
+        </div>
+
+        <!-- Action Button -->
+        <button id="generate-btn" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-gray-800 focus:ring-blue-500">
+            Generate Speech
+        </button>
+
+        <!-- Output Area -->
+        <div class="h-20 flex items-center justify-center">
+            <div id="loader" class="loader hidden"></div>
+            <div id="error-message" class="text-red-400 text-center hidden"></div>
+            <div id="audio-output" class="w-full hidden">
+                 <audio id="audio-player" controls class="w-full rounded-lg"></audio>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main Application Logic -->
+    <script>
+        // DOM element references
+        const textInput = document.getElementById('text-input');
+        const voiceSelect = document.getElementById('voice-select');
+        const generateBtn = document.getElementById('generate-btn');
+        const loader = document.getElementById('loader');
+        const audioPlayer = document.getElementById('audio-player');
+        const audioOutput = document.getElementById('audio-output');
+        const errorMessage = document.getElementById('error-message');
+
+        // IMPORTANT: The Gemini API requires an API key.
+        // In this environment, the key is automatically provided.
+        // For use outside of this environment, you must get your own key from Google AI Studio.
+        const apiKey = ""; 
+
+        // List of available voices from the Gemini documentation
+        const voices = [
+            "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede", "Callirrhoe",
+            "Autonoe", "Enceladus", "Iapetus", "Umbriel", "Algieba", "Despina", "Erinome", 
+            "Algenib", "Rasalgethi", "Laomedeia", "Achernar", "Alnilam", "Schedar", "Gacrux",
+            "Pulcherrima", "Achird", "Zubenelgenubi", "Vindemiatrix", "Sadachbia", "Sadaltager", "Sulafat"
+        ];
+        
+        // --- Functions ---
+
+        /**
+         * Populates the voice selection dropdown with available voices.
+         */
+        function populateVoices() {
+            voices.sort().forEach(voice => {
+                const option = document.createElement('option');
+                option.value = voice;
+                option.textContent = voice;
+                voiceSelect.appendChild(option);
+            });
+        }
+        
+        /**
+         * Converts a base64 string to an ArrayBuffer.
+         * @param {string} base64 The base64 encoded string.
+         * @returns {ArrayBuffer} The decoded ArrayBuffer.
+         */
+        function base64ToArrayBuffer(base64) {
+            const binaryString = window.atob(base64);
+            const len = binaryString.length;
+            const bytes = new Uint8Array(len);
+            for (let i = 0; i < len; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            return bytes.buffer;
+        }
+
+        /**
+         * Converts raw PCM audio data into a playable WAV file format.
+         * The Gemini TTS API returns raw signed 16-bit PCM audio data.
+         * This function adds the necessary WAV header to make it a valid audio file.
+         * @param {Int16Array} pcmData The raw PCM data.
+         * @param {number} sampleRate The sample rate of the audio (e.g., 24000).
+         * @returns {Blob} A Blob representing the complete WAV file.
+         */
+        function pcmToWav(pcmData, sampleRate) {
+            const numChannels = 1;
+            const bitsPerSample = 16;
+            const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+            const blockAlign = numChannels * bitsPerSample / 8;
+            const dataSize = pcmData.length * pcmData.BYTES_PER_ELEMENT;
+
+            const buffer = new ArrayBuffer(44 + dataSize);
+            const view = new DataView(buffer);
+
+            // RIFF chunk descriptor
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + dataSize, true);
+            writeString(view, 8, 'WAVE');
+            
+            // "fmt " sub-chunk
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true); // Subchunk1Size
+            view.setUint16(20, 1, true); // AudioFormat (1=PCM)
+            view.setUint16(22, numChannels, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, byteRate, true);
+            view.setUint16(32, blockAlign, true);
+            view.setUint16(34, bitsPerSample, true);
+            
+            // "data" sub-chunk
+            writeString(view, 36, 'data');
+            view.setUint32(40, dataSize, true);
+            
+            // Write PCM data
+            const pcmAsInt16 = new Int16Array(pcmData.buffer);
+            const dataView = new Int16Array(buffer, 44);
+            dataView.set(pcmAsInt16);
+
+            function writeString(view, offset, string) {
+                for (let i = 0; i < string.length; i++) {
+                    view.setUint8(offset + i, string.charCodeAt(i));
+                }
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+
+        /**
+         * Main function to call the Gemini API and generate speech.
+         */
+        async function generateSpeech() {
+            const text = textInput.value.trim();
+            const voice = voiceSelect.value;
+            
+            if (!text) {
+                errorMessage.textContent = 'Please enter some text to generate speech.';
+                errorMessage.classList.remove('hidden');
+                return;
+            }
+
+            // --- Update UI for loading state ---
+            generateBtn.disabled = true;
+            generateBtn.textContent = 'Generating...';
+            loader.classList.remove('hidden');
+            audioOutput.classList.add('hidden');
+            errorMessage.classList.add('hidden');
+
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`;
+
+            const payload = {
+                contents: [{
+                    parts: [{ text: text }]
+                }],
+                generationConfig: {
+                    responseModalities: ["AUDIO"],
+                    speechConfig: {
+                        voiceConfig: {
+                            prebuiltVoiceConfig: { voiceName: voice }
+                        }
+                    }
+                },
+                model: "gemini-2.5-flash-preview-tts"
+            };
+
+            try {
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(payload),
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                const part = result?.candidates?.[0]?.content?.parts?.[0];
+                const audioData = part?.inlineData?.data;
+                const mimeType = part?.inlineData?.mimeType;
+
+                if (audioData && mimeType && mimeType.startsWith("audio/")) {
+                    const sampleRateMatch = mimeType.match(/rate=(\d+)/);
+                    const sampleRate = sampleRateMatch ? parseInt(sampleRateMatch[1], 10) : 24000;
+                    
+                    const pcmBuffer = base64ToArrayBuffer(audioData);
+                    // The API returns signed 16-bit PCM data.
+                    const pcm16 = new Int16Array(pcmBuffer);
+                    
+                    const wavBlob = pcmToWav(pcm16, sampleRate);
+                    const audioUrl = URL.createObjectURL(wavBlob);
+
+                    audioPlayer.src = audioUrl;
+                    audioOutput.classList.remove('hidden');
+                } else {
+                    throw new Error('Invalid audio data received from API.');
+                }
+
+            } catch (error) {
+                console.error('Error generating speech:', error);
+                errorMessage.textContent = `An error occurred: ${error.message}`;
+                errorMessage.classList.remove('hidden');
+            } finally {
+                // --- Reset UI from loading state ---
+                generateBtn.disabled = false;
+                generateBtn.textContent = 'Generate Speech';
+                loader.classList.add('hidden');
+            }
+        }
+
+        // --- Event Listeners and Initialization ---
+        
+        // Populate voice options on page load
+        document.addEventListener('DOMContentLoaded', populateVoices);
+        
+        // Attach click listener to the generate button
+        generateBtn.addEventListener('click', generateSpeech);
+    </script>
+
+</body>
+</html>
